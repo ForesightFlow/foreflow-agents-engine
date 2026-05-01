@@ -1,0 +1,17 @@
+# ForeFlow agent crontab
+# Install: crontab -e  (or use `foreflow-engine bootstrap-vps`)
+# Logs:    /var/log/foreflow/
+#
+# discover every 2 hours — drain reveal queue, check for new rounds
+0 */2 * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh discover ensemble      >> /var/log/foreflow/ensemble-discover.log     2>&1
+0 */2 * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh discover debate        >> /var/log/foreflow/debate-discover.log       2>&1
+0 */2 * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh discover orchestrator  >> /var/log/foreflow/orchestrator-discover.log 2>&1
+0 */2 * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh discover pipeline      >> /var/log/foreflow/pipeline-discover.log     2>&1
+0 */2 * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh discover consensus     >> /var/log/foreflow/consensus-discover.log    2>&1
+#
+# predict every 5 minutes — commit predictions when round is within LEAD_TIME_SECONDS
+*/5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict ensemble      >> /var/log/foreflow/ensemble-predict.log     2>&1
+*/5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict debate        >> /var/log/foreflow/debate-predict.log       2>&1
+*/5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict orchestrator  >> /var/log/foreflow/orchestrator-predict.log 2>&1
+*/5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict pipeline      >> /var/log/foreflow/pipeline-predict.log     2>&1
+*/5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict consensus     >> /var/log/foreflow/consensus-predict.log    2>&1

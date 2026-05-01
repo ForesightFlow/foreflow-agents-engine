@@ -1,0 +1,29 @@
+{
+  "name": "foreflow-agents-engine",
+  "version": "0.1.0",
+  "description": "Operational infrastructure for ForeFlow agents — registration, scheduling, healthcheck, and deployment",
+  "type": "module",
+  "bin": {
+    "foreflow-engine": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'dist/tests/*.test.js'",
+    "build:test": "tsc && node --test 'dist/tests/*.test.js'",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "foresight-arena": "^0.1.6",
+    "viem": "^2.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "author": "Maksym Nechepurenko, Pavel Shuvalov",
+  "license": "MIT"
+}

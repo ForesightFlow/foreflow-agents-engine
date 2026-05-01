@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper."
+type: software
+title: "ForeFlow Agents Engine"
+abstract: >
+  Operational infrastructure for running five Foresight Arena forecasting
+  agents (foreflow-ensemble, foreflow-debate, foreflow-orchestrator,
+  foreflow-pipeline, foreflow-consensus). Provides wallet registration,
+  cron-based scheduling, healthchecks, and VPS deployment tooling for
+  "Coordination as an Architectural Layer for LLM-Based Multi-Agent Systems".
+authors:
+  - family-names: Nechepurenko
+    given-names: Maksym
+  - family-names: Shuvalov
+    given-names: Pavel
+version: "0.1.0"
+date-released: "2026-04-28"
+license: MIT
+repository-code: "https://github.com/ForesightFlow/foreflow-agents-engine"
+preferred-citation:
+  type: article
+  title: >
+    Coordination as an Architectural Layer for LLM-Based Multi-Agent Systems:
+    A Position Paper with an Information-Controlled Empirical Design
+  authors:
+    - family-names: Nechepurenko
+      given-names: Maksym
+    - family-names: Shuvalov
+      given-names: Pavel
+  year: 2026
+  notes: "Working paper; arXiv DOI to be added after submission"
