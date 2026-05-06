@@ -345,6 +345,52 @@ test('registerAll dryRun → 1 registered + 4 pending in summary', async () => {
   assert.ok(summary.includes('foreflow-debate'));
 });
 
+// ---------------------------------------------------------------------------
+// Regression: registered.json isolation — tests must not touch ~/.foreflow-state
+// ---------------------------------------------------------------------------
+
+test('dry-run registerAgent does not write to ~/.foreflow-state', async () => {
+  const realHome = os.homedir();
+  const realStateFile = join(realHome, '.foreflow-state', 'ensemble', 'registered.json');
+
+  // Snapshot before
+  let beforeContent: string | null = null;
+  try { beforeContent = (await import('node:fs')).readFileSync(realStateFile, 'utf8'); } catch { /* absent */ }
+
+  saveFakeTokens('foreflow-ensemble');
+  const { registerAgent } = await import('../src/register/interactive.js');
+  await registerAgent('ensemble', { dryRun: true, noManualFallback: false, noConfirmPause: true });
+
+  // Snapshot after
+  let afterContent: string | null = null;
+  try { afterContent = (await import('node:fs')).readFileSync(realStateFile, 'utf8'); } catch { /* absent */ }
+
+  assert.equal(afterContent, beforeContent,
+    `dry-run must not modify ~/.foreflow-state/ensemble/registered.json`);
+});
+
+test('live registerAgent (mocked) does not write to ~/.foreflow-state', async () => {
+  const realHome = os.homedir();
+  const realStateFile = join(realHome, '.foreflow-state', 'ensemble', 'registered.json');
+
+  let beforeContent: string | null = null;
+  try { beforeContent = (await import('node:fs')).readFileSync(realStateFile, 'utf8'); } catch { /* absent */ }
+
+  saveFakeTokens('foreflow-ensemble');
+  _setClientGetterForTest(async () => makeMockClient('tweet-isolation-check').client);
+  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
+  _setVerifyTweetFnForTest(async () => ({ voucher: MOCK_VOUCHER }));
+  _setRegisterFnForTest(async () => ({ agentId: 'agent-test-isolation', txHash: '0x1234' }));
+
+  await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
+
+  let afterContent: string | null = null;
+  try { afterContent = (await import('node:fs')).readFileSync(realStateFile, 'utf8'); } catch { /* absent */ }
+
+  assert.equal(afterContent, beforeContent,
+    `live registerAgent (with FOREFLOW_STATE_DIR set to tmp) must not touch ~/.foreflow-state/ensemble/registered.json`);
+});
+
 // Cleanup
 test.after?.(() => {
   try { rmSync(TMP, { recursive: true }); } catch { /* ignore */ }

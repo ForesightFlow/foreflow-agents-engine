@@ -3,10 +3,9 @@ import { join } from 'node:path';
 import os from 'node:os';
 import type { AgentName } from './env.js';
 
-const STATE_ROOT = join(os.homedir(), '.foreflow-state');
-
 export function agentStateDir(name: AgentName): string {
-  const dir = join(STATE_ROOT, name);
+  const root = process.env.FOREFLOW_STATE_DIR ?? join(os.homedir(), '.foreflow-state');
+  const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

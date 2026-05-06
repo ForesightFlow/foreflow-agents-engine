@@ -5,13 +5,9 @@ import { join } from 'node:path';
 import os from 'node:os';
 
 // Point state at a temp dir so tests don't touch ~/.foreflow-state
-const TMP = join(os.tmpdir(), `foreflow-engine-test-${process.pid}`);
+const TMP = join(os.tmpdir(), `foreflow-engine-state-test-${process.pid}`);
+process.env.FOREFLOW_STATE_DIR = TMP;
 
-// Patch HOME so state.ts resolves to TMP.
-const originalHome = os.homedir;
-Object.defineProperty(os, 'homedir', { value: () => TMP, configurable: true });
-
-// Dynamic import AFTER patching so the module picks up the patched homedir.
 const { agentStateDir, saveRegistration, loadRegistration, saveLastDiscover, loadLastDiscover } =
   await import('../src/lib/state.js');
 
@@ -50,6 +46,6 @@ test('loadLastDiscover returns null for fresh agent', () => {
 
 // Cleanup
 test.after?.(() => {
-  Object.defineProperty(os, 'homedir', { value: originalHome, configurable: true });
+  delete process.env.FOREFLOW_STATE_DIR;
   try { rmSync(TMP, { recursive: true }); } catch {}
 });
