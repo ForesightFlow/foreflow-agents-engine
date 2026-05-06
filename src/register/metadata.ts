@@ -90,7 +90,7 @@ export function buildAgentURI(
     type: ERC_8004_TYPE,
     name: agentName,
     description: CONFIG_DESCRIPTIONS[configuration],
-    image: `https://api.foresightarena.xyz/agent/${addr}/image`,
+    image: 'https://raw.githubusercontent.com/ForesightFlow/foreflow-agents/master/avatar.png',
     external_url: `https://foresightarena.xyz/agent/${addr}`,
     active: true,
     registrations: [{ agentRegistry: `eip155:${chainId}:${ERC_8004_REGISTRY}` }],

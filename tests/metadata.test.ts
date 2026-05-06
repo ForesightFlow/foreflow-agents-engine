@@ -65,19 +65,16 @@ test('buildAgentURI: name matches full agent name', () => {
   }
 });
 
-test('buildAgentURI: addresses in image and external_url are lowercase', () => {
+test('buildAgentURI: external_url address is lowercase', () => {
   const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS));
-  assert.ok(meta?.image.includes(MOCK_ADDRESS_LOWER), `image must use lowercase address`);
   assert.ok(meta?.external_url.includes(MOCK_ADDRESS_LOWER), `external_url must use lowercase address`);
-  assert.ok(!meta?.image.includes(MOCK_ADDRESS.slice(2, 6)), 'image must not contain mixed-case chars from original');
 });
 
-test('buildAgentURI: image URL is dynamic API endpoint, not static file', () => {
+test('buildAgentURI: image URL is shared static avatar', () => {
   const meta = decodeAgentURI(buildAgentURI('foreflow-debate', MOCK_ADDRESS));
   assert.equal(
     meta?.image,
-    `https://api.foresightarena.xyz/agent/${MOCK_ADDRESS_LOWER}/image`,
-    `image should be the Arena dynamic endpoint`,
+    'https://raw.githubusercontent.com/ForesightFlow/foreflow-agents/master/avatar.png',
   );
 });
 
