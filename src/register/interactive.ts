@@ -36,6 +36,22 @@ export function _closeSharedRl(): void {
   _sharedRl = null;
 }
 
+// Injectable SDK wrappers — replaced in tests to avoid real network calls
+export let _requestChallengeFn: typeof requestChallenge = requestChallenge;
+export function _setRequestChallengeFnForTest(fn: typeof requestChallenge): void {
+  _requestChallengeFn = fn;
+}
+
+export let _verifyTweetFn: typeof verifyTweet = verifyTweet;
+export function _setVerifyTweetFnForTest(fn: typeof verifyTweet): void {
+  _verifyTweetFn = fn;
+}
+
+export let _registerFn: typeof register = register;
+export function _setRegisterFnForTest(fn: typeof register): void {
+  _registerFn = fn;
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -88,7 +104,7 @@ function arenaAddress(): string {
 }
 
 async function fetchChallenge(address: string): Promise<ChallengeResult> {
-  const raw = (await requestChallenge(address)) as Record<string, string | number>;
+  const raw = (await _requestChallengeFn(address)) as Record<string, string | number>;
   return {
     tweetText:
       (raw.suggestedTweet ?? raw.tweetText ?? raw.tweet_text ?? raw.message ?? '') as string,
@@ -291,12 +307,25 @@ async function doRegisterLive(
 
   // Verify tweet
   console.log('\nVerifying tweet...');
-  const voucher = await verifyTweet(address, voucherResult.tweetUrl.trim());
+  const verifyResp = await _verifyTweetFn(address, voucherResult.tweetUrl.trim());
+
+  // SDK returns the full response object; extract the bare token for register()
+  const voucher = typeof verifyResp === 'string'
+    ? verifyResp
+    : (verifyResp as Record<string, unknown>)?.voucher as string | undefined;
+
+  if (!voucher) {
+    const msg = `Voucher token missing from Arena verify response: ${JSON.stringify(verifyResp)}`;
+    console.error(`✗ ${msg}`);
+    return { agentName: fullName, status: 'failed', stage: 'verify', error: msg };
+  }
+
+  console.log('✓ Voucher received from Arena');
 
   // Register via relayer
   console.log('Registering on chain (gasless via relayer)...');
   const agentURI = `${AGENT_URI_BASE}/foreflow-${name}`;
-  const reg = (await register({ agent: address, agentURI, voucher })) as RegisterResult;
+  const reg = (await _registerFn({ agent: address, agentURI, voucher })) as RegisterResult;
 
   const agentId = reg.agentId ?? reg.txHash ?? '(unknown)';
   const txHash = reg.txHash;

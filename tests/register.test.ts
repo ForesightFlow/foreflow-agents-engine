@@ -209,6 +209,87 @@ test('second URL attempt valid → returns on second try', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// verifyTweet voucher extraction — regression tests for v0.3.1 bug fix
+// ---------------------------------------------------------------------------
+
+// Import the injectable SDK wrappers from interactive.ts
+const {
+  registerAgent: _registerAgent,
+  _setRequestChallengeFnForTest,
+  _setVerifyTweetFnForTest,
+  _setRegisterFnForTest,
+  _setPromptFnForTest: _setInteractivePromptFnForTest,
+} = await import('../src/register/interactive.js');
+
+// Shared mock challenge response (real Arena shape post-fix)
+const MOCK_CHALLENGE = {
+  code: 'fsa-test-code',
+  suggestedTweet: 'I am registering as a Foresight Arena agent. Code: fsa-test-code',
+  expiresAt: Math.floor(Date.now() / 1000) + 3600,
+};
+
+// Inject a prompt that auto-confirms all questions
+_setInteractivePromptFnForTest(async () => 'y');
+
+test('live registerAgent: verifyTweet object response → register receives bare token', async () => {
+  saveFakeTokens('foreflow-ensemble');
+  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-1').client);
+  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
+
+  const registeredCalls: Array<{ agent: string; agentURI: string; voucher: unknown }> = [];
+  _setVerifyTweetFnForTest(async () => ({
+    voucher: 'mock-voucher-token-0xABCDEF',
+    agentURI: 'https://github.com/...',
+    expiresAt: Math.floor(Date.now() / 1000) + 300,
+  }));
+  _setRegisterFnForTest(async (args) => {
+    registeredCalls.push(args as { agent: string; agentURI: string; voucher: unknown });
+    return { agentId: 'agent-test-1', txHash: '0xdeadbeef' };
+  });
+
+  const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
+
+  assert.equal(result.status, 'registered', `Expected registered, got ${result.status}: ${result.error}`);
+  assert.equal(registeredCalls.length, 1, 'register() should be called exactly once');
+  // Crucially: register() must receive the bare string token, not the whole response object
+  assert.equal(registeredCalls[0].voucher, 'mock-voucher-token-0xABCDEF',
+    'register() must receive bare voucher token, not full response object');
+});
+
+test('live registerAgent: verifyTweet string response (forward-compat) → register receives it directly', async () => {
+  saveFakeTokens('foreflow-ensemble');
+  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-2').client);
+  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
+
+  const registeredCalls: Array<{ agent: string; agentURI: string; voucher: unknown }> = [];
+  _setVerifyTweetFnForTest(async () => 'bare-string-voucher-token');
+  _setRegisterFnForTest(async (args) => {
+    registeredCalls.push(args as { agent: string; agentURI: string; voucher: unknown });
+    return { agentId: 'agent-test-2' };
+  });
+
+  const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
+
+  assert.equal(result.status, 'registered');
+  assert.equal(registeredCalls[0].voucher, 'bare-string-voucher-token');
+});
+
+test('live registerAgent: verifyTweet missing voucher field → fails with stage verify', async () => {
+  saveFakeTokens('foreflow-ensemble');
+  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-3').client);
+  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
+  _setVerifyTweetFnForTest(async () => ({ agentURI: 'https://github.com/...', expiresAt: 9999 }));
+  _setRegisterFnForTest(async () => { throw new Error('should not be called'); });
+
+  const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.stage, 'verify');
+  assert.ok(result.error?.includes('Voucher token missing'), `Expected 'Voucher token missing' in: ${result.error}`);
+  assert.ok(result.error?.includes('agentURI'), 'Error should capture the raw response for debugging');
+});
+
+// ---------------------------------------------------------------------------
 // registerAgent dry-run
 // ---------------------------------------------------------------------------
 
