@@ -2,6 +2,7 @@ import readline from 'node:readline';
 import { requestChallenge, verifyTweet, register } from 'foresight-arena';
 import { generateWallet } from './wallet.js';
 import { postVoucherTweet, NoTokensError } from './voucher_tweet.js';
+import { buildAgentURI } from './metadata.js';
 import { saveRegistration } from '../lib/state.js';
 import { DRY_RUN, AGENT_NAMES, CHAIN_ID } from '../lib/env.js';
 import { openDb } from '../storage/sqlite.js';
@@ -92,9 +93,6 @@ interface RegisterResult {
   agentId: string;
   txHash?: string;
 }
-
-const AGENT_URI_BASE =
-  'https://github.com/ForesightFlow/foreflow-agents/tree/master/agents';
 
 function shortToFull(name: AgentName): FullAgentName {
   return `foreflow-${name}` as FullAgentName;
@@ -221,6 +219,7 @@ async function doRegister(
         `[DRY-RUN] Would mint Agent NFT on chain (Arena: ${arena})`,
       );
       console.log(`[DRY-RUN]   Estimated gas: ~0.005 POL (paid by relayer)`);
+      console.log(`[DRY-RUN]   agentURI: ${buildAgentURI(name, mockAddr)}`);
       console.log(
         `[DRY-RUN] Would save to ~/.foreflow-state/${name}/registered.json`,
       );
@@ -335,7 +334,7 @@ async function doRegisterLive(
 
   // Register via relayer
   console.log('Registering on chain (gasless via relayer)...');
-  const agentURI = `${AGENT_URI_BASE}/foreflow-${name}`;
+  const agentURI = buildAgentURI(name, address);
   const reg = (await _registerFn({ agent: address, agentURI, voucher })) as RegisterResult;
 
   const agentId = reg.agentId ?? reg.txHash ?? '(unknown)';
