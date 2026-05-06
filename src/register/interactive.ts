@@ -64,6 +64,7 @@ export interface AgentRegistrationResult {
 interface ChallengeResult {
   tweetText: string;
   challenge: string;
+  expiresAt: number | null;
 }
 
 interface RegisterResult {
@@ -87,11 +88,12 @@ function arenaAddress(): string {
 }
 
 async function fetchChallenge(address: string): Promise<ChallengeResult> {
-  const raw = (await requestChallenge(address)) as Record<string, string>;
+  const raw = (await requestChallenge(address)) as Record<string, string | number>;
   return {
     tweetText:
-      raw.tweetText ?? raw.tweet_text ?? raw.suggestedTweetText ?? raw.message ?? '(no tweet text returned)',
-    challenge: raw.challenge ?? raw.challengeCode ?? '',
+      (raw.suggestedTweet ?? raw.tweetText ?? raw.tweet_text ?? raw.message ?? '') as string,
+    challenge: (raw.code ?? raw.challenge ?? raw.challengeCode ?? '') as string,
+    expiresAt: typeof raw.expiresAt === 'number' ? raw.expiresAt : null,
   };
 }
 
@@ -177,7 +179,8 @@ async function doRegister(
     console.log('[DRY-RUN] Would prompt: "Save key to .env, press Enter..."');
     console.log('[DRY-RUN] Would request voucher challenge from Foresight Arena');
     console.log(`[DRY-RUN]   Mock response: { code: '${mockCode}',`);
-    console.log(`                              suggestedTweetText: '${mockText}' }`);
+    console.log(`                              suggestedTweet: '${mockText}',`);
+    console.log(`                              expiresAt: <unix timestamp> }`);
 
     const db = openDb();
     const tokens = getTwitterTokens(db, fullName);
@@ -260,8 +263,14 @@ async function doRegisterLive(
   console.log('\nRequesting voucher challenge from Foresight Arena...');
   const challenge = await fetchChallenge(address);
 
-  if (!challenge.tweetText || challenge.tweetText === '(no tweet text returned)') {
+  if (!challenge.tweetText) {
     const msg = 'Arena returned empty challenge text. Cannot post voucher tweet.';
+    console.error(`✗ ${msg}`);
+    return { agentName: fullName, status: 'failed', stage: 'challenge', error: msg };
+  }
+
+  if (challenge.expiresAt !== null && Math.floor(Date.now() / 1000) > challenge.expiresAt) {
+    const msg = 'Challenge expired — re-run registration.';
     console.error(`✗ ${msg}`);
     return { agentName: fullName, status: 'failed', stage: 'challenge', error: msg };
   }
