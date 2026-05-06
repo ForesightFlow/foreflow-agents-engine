@@ -114,16 +114,13 @@ A round is never included in any status post (daily or resolution) unless ALL of
 conditions hold for every prediction the agent submitted in that round:
 
 1. **All revealed on-chain** — every prediction in the round has `reveal_at IS NOT NULL`
-   in the local DB (`HAVING COUNT(*) = COUNT(reveal_at)`).
+   in the local DB (`HAVING COUNT(*) = COUNT(reveal_at)`). **This is the active guard
+   in v0.4.x** — see the status note below.
 2. **Deadline passed** — the round's `reveal_deadline`, if set, is in the past
-   (`reveal_deadline IS NULL OR reveal_deadline < now`). A `NULL` deadline is treated as
-   "no restriction" (see note below).
-3. **(Resolution posts only)** — at least one of the agent's predictions in that round
+   (`reveal_deadline IS NULL OR reveal_deadline < now`). Currently inert — see below.
+3. **(Resolution posts only)** — at least one of this agent's predictions in that round
    has `outcome IS NOT NULL` AND `resolved_at > last_resolution_post_at`, meaning there
    is actually something new to announce.
-
-This ensures no directional or Brier-score information is published about predictions that
-are still active in the commit or reveal phase.
 
 ### Implementation
 
@@ -139,15 +136,61 @@ The resolution-status live path additionally wraps the read → post → write c
 `BEGIN IMMEDIATE` SQLite transaction so that parallel cron ticks cannot race on
 `last_resolution_post_at` and post duplicate tweets.
 
-### Note on `reveal_deadline`
+### Status of each guard in v0.4.x
+
+#### Guard 1 — all-revealed (ACTIVE)
+
+`HAVING COUNT(*) = COUNT(reveal_at)` is evaluated against live DB rows. `reveal_at` is
+written by `updatePredictionReveal()` when the agent's on-chain reveal transaction is
+confirmed. A round with any unrevealed prediction is excluded until every prediction in
+that round has been revealed. This guard is fully active and tested.
+
+#### Guard 2 — reveal_deadline (INERT — all rows have NULL)
 
 The `reveal_deadline` column exists in the DB schema and is honoured by both query
-helpers, but it is not currently populated by the JSONL event pipeline — the
-`prediction_started` event type has no `revealDeadline` field. All production rows
-therefore have `reveal_deadline = NULL`, which satisfies the `IS NULL` branch of the
-guard (fail-open: no restriction applied). The "all revealed" guard (`COUNT(reveal_at)`)
-provides the primary protection. To enable deadline enforcement, add `revealDeadline` to
-the `prediction_started` event and emit it from agent subprocesses.
+helpers, but **no event in the current JSONL pipeline writes to it**. The
+`prediction_started` event type (`src/events/types.ts`) has no `revealDeadline` field,
+so `EventHandler` never sets it. All production rows therefore have
+`reveal_deadline = NULL`, which satisfies the `IS NULL` branch of the guard — every
+round passes the deadline check unconditionally.
+
+**Why the architecture is still safe despite the inert deadline guard:**
+
+The deadline guard was intended to prevent a second class of leak: publishing probability
+information about a round whose commit phase is still open, allowing other agents to
+observe a published Brier score and adjust their own uncommitted predictions.
+
+This attack is already blocked by a different mechanism: Foresight Arena uses a
+commit-reveal scheme. An agent's prediction is committed as a hash (`keccak256(salt ||
+probability)`) on-chain before the market closes. Other agents cannot profitably adjust
+their own commitment after seeing a published round summary, because:
+
+1. **Commit hashes are locked.** Any agent that has already committed cannot change its
+   probability. An agent that hasn't committed yet cannot see the revealed probability
+   either — `reveal_at IS NOT NULL` (Guard 1) means our agent has already broadcast the
+   reveal transaction, which is public on-chain. The probability is therefore already
+   visible on-chain before we post the tweet.
+2. **Resolution implies commitment window is closed.** Guard 3 (for resolution posts)
+   requires `outcome IS NOT NULL`, which means the Arena contract has resolved the market.
+   Market resolution happens after the reveal phase ends. A resolved market has no open
+   commitment slots for other agents to exploit.
+
+In short: by the time any of our status posts fire, the information is already public
+on-chain. The deadline guard would add defence-in-depth against a hypothetical edge case
+where our DB lags the on-chain state, but it is not load-bearing for the current threat
+model.
+
+#### Enabling Guard 2
+
+To activate the deadline guard and close the theoretical lag window:
+
+1. Add `revealDeadline?: number` to the `prediction_started` event type in
+   `src/events/types.ts`.
+2. Have agent subprocesses emit `revealDeadline` in `prediction_started` events (the
+   Arena SDK exposes this as `round.revealDeadline` or similar).
+3. Write it through `EventHandler.dispatch` → `savePrediction`.
+
+No query changes are needed — both helpers already read `reveal_deadline` from the DB.
 
 ---
 
@@ -160,8 +203,9 @@ the `prediction_started` event and emit it from agent subprocesses.
 2. Check reveal status: run the query in the "Reveal-leak prevention" section with
    your agent name and `strftime('%s','now')` as the second parameter. The round must
    appear in the result set.
-3. Check `reveal_deadline`: if the round has a future deadline, it will be withheld
-   until after that deadline even if all reveals are on-chain.
+3. Check `reveal_deadline`: if the round has a future deadline set in the DB, it will be
+   withheld until after that deadline. In v0.4.x this column is always NULL (inert), so
+   this is not a likely cause — see the "Reveal-leak prevention guarantee" section.
 
 ### Daily status shows 0 rounds
 
