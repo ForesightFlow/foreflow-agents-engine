@@ -3,7 +3,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 
-const engineRoot = join(fileURLToPath(import.meta.url), '..', '..', '..');
+// dist/src/lib/env.js → 4 levels up = engine root
+const engineRoot = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
 const envPath = join(engineRoot, '.env');
 if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf8').split('\n')) {
