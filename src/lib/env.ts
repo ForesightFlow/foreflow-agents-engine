@@ -10,7 +10,9 @@ if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf8').split('\n')) {
     const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
     if (m && !(m[1] in process.env)) {
-      process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1');
+      // Strip unquoted inline comments (VALUE # comment) then unquote
+      const raw = m[2].replace(/\s+#.*$/, '').trim();
+      process.env[m[1]] = raw.replace(/^"(.*)"$/, '$1');
     }
   }
 }
