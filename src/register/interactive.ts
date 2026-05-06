@@ -83,6 +83,11 @@ interface ChallengeResult {
   expiresAt: number | null;
 }
 
+interface VoucherToken {
+  signature: `0x${string}`;
+  expiry: number;
+}
+
 interface RegisterResult {
   agentId: string;
   txHash?: string;
@@ -209,7 +214,7 @@ async function doRegister(
         noConfirmPause,
       });
       console.log('[DRY-RUN] Would verify tweet with Arena');
-      console.log(`[DRY-RUN]   Mock response: { voucher: 'MOCK_VOUCHER' }`);
+      console.log(`[DRY-RUN]   Mock response: { voucher: { signature: '0x...', expiry: <unix> } }`);
       console.log(
         `[DRY-RUN] Would mint Agent NFT on chain (Arena: ${arena})`,
       );
@@ -309,13 +314,17 @@ async function doRegisterLive(
   console.log('\nVerifying tweet...');
   const verifyResp = await _verifyTweetFn(address, voucherResult.tweetUrl.trim());
 
-  // SDK returns the full response object; extract the bare token for register()
-  const voucher = typeof verifyResp === 'string'
-    ? verifyResp
-    : (verifyResp as Record<string, unknown>)?.voucher as string | undefined;
+  // Arena returns { voucher: { signature, expiry } }; extract and validate
+  const voucher = (verifyResp as Record<string, unknown>)?.voucher as VoucherToken | undefined;
 
-  if (!voucher) {
-    const msg = `Voucher token missing from Arena verify response: ${JSON.stringify(verifyResp)}`;
+  if (!voucher || !voucher.signature || !voucher.expiry) {
+    const msg = `Voucher token missing or malformed from Arena verify response: ${JSON.stringify(verifyResp)}`;
+    console.error(`✗ ${msg}`);
+    return { agentName: fullName, status: 'failed', stage: 'verify', error: msg };
+  }
+
+  if (voucher.expiry < Math.floor(Date.now() / 1000)) {
+    const msg = `Voucher already expired (expiry ${voucher.expiry}, now ${Math.floor(Date.now() / 1000)})`;
     console.error(`✗ ${msg}`);
     return { agentName: fullName, status: 'failed', stage: 'verify', error: msg };
   }

@@ -231,17 +231,15 @@ const MOCK_CHALLENGE = {
 // Inject a prompt that auto-confirms all questions
 _setInteractivePromptFnForTest(async () => 'y');
 
-test('live registerAgent: verifyTweet object response → register receives bare token', async () => {
+const MOCK_VOUCHER = { signature: '0xabc123def456' as `0x${string}`, expiry: Math.floor(Date.now() / 1000) + 3600 };
+
+test('live registerAgent: verifyTweet object response → register receives voucher object', async () => {
   saveFakeTokens('foreflow-ensemble');
   _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-1').client);
   _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
 
   const registeredCalls: Array<{ agent: string; agentURI: string; voucher: unknown }> = [];
-  _setVerifyTweetFnForTest(async () => ({
-    voucher: 'mock-voucher-token-0xABCDEF',
-    agentURI: 'https://github.com/...',
-    expiresAt: Math.floor(Date.now() / 1000) + 300,
-  }));
+  _setVerifyTweetFnForTest(async () => ({ voucher: MOCK_VOUCHER }));
   _setRegisterFnForTest(async (args) => {
     registeredCalls.push(args as { agent: string; agentURI: string; voucher: unknown });
     return { agentId: 'agent-test-1', txHash: '0xdeadbeef' };
@@ -251,42 +249,40 @@ test('live registerAgent: verifyTweet object response → register receives bare
 
   assert.equal(result.status, 'registered', `Expected registered, got ${result.status}: ${result.error}`);
   assert.equal(registeredCalls.length, 1, 'register() should be called exactly once');
-  // Crucially: register() must receive the bare string token, not the whole response object
-  assert.equal(registeredCalls[0].voucher, 'mock-voucher-token-0xABCDEF',
-    'register() must receive bare voucher token, not full response object');
-});
-
-test('live registerAgent: verifyTweet string response (forward-compat) → register receives it directly', async () => {
-  saveFakeTokens('foreflow-ensemble');
-  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-2').client);
-  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
-
-  const registeredCalls: Array<{ agent: string; agentURI: string; voucher: unknown }> = [];
-  _setVerifyTweetFnForTest(async () => 'bare-string-voucher-token');
-  _setRegisterFnForTest(async (args) => {
-    registeredCalls.push(args as { agent: string; agentURI: string; voucher: unknown });
-    return { agentId: 'agent-test-2' };
-  });
-
-  const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
-
-  assert.equal(result.status, 'registered');
-  assert.equal(registeredCalls[0].voucher, 'bare-string-voucher-token');
+  // register() must receive the extracted voucher object, not the full verify response
+  assert.deepEqual(registeredCalls[0].voucher, MOCK_VOUCHER,
+    'register() must receive the voucher object extracted from verifyResp.voucher');
 });
 
 test('live registerAgent: verifyTweet missing voucher field → fails with stage verify', async () => {
   saveFakeTokens('foreflow-ensemble');
-  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-3').client);
+  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-2').client);
   _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
-  _setVerifyTweetFnForTest(async () => ({ agentURI: 'https://github.com/...', expiresAt: 9999 }));
+  _setVerifyTweetFnForTest(async () => ({ agentURI: 'https://github.com/...' }));
   _setRegisterFnForTest(async () => { throw new Error('should not be called'); });
 
   const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
 
   assert.equal(result.status, 'failed');
   assert.equal(result.stage, 'verify');
-  assert.ok(result.error?.includes('Voucher token missing'), `Expected 'Voucher token missing' in: ${result.error}`);
-  assert.ok(result.error?.includes('agentURI'), 'Error should capture the raw response for debugging');
+  assert.ok(result.error?.includes('Voucher token missing or malformed'), `Got: ${result.error}`);
+  assert.ok(result.error?.includes('agentURI'), 'Raw response should appear in error for debugging');
+});
+
+test('live registerAgent: expired voucher → fails with stage verify', async () => {
+  saveFakeTokens('foreflow-ensemble');
+  _setClientGetterForTest(async () => makeMockClient('tweet-live-reg-3').client);
+  _setRequestChallengeFnForTest(async () => ({ ...MOCK_CHALLENGE }));
+  _setVerifyTweetFnForTest(async () => ({
+    voucher: { signature: '0xdeadbeef' as `0x${string}`, expiry: Math.floor(Date.now() / 1000) - 10 },
+  }));
+  _setRegisterFnForTest(async () => { throw new Error('should not be called'); });
+
+  const result = await _registerAgent('ensemble', { dryRun: false, noManualFallback: true, noConfirmPause: true });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.stage, 'verify');
+  assert.ok(result.error?.includes('Voucher already expired'), `Got: ${result.error}`);
 });
 
 // ---------------------------------------------------------------------------
