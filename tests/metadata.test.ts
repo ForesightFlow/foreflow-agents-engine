@@ -4,95 +4,153 @@ import assert from 'node:assert/strict';
 const { buildAgentURI, decodeAgentURI } = await import('../src/register/metadata.js');
 
 const MOCK_ADDRESS = '0xA1b38e04C3f334c2B0D5003C51e857DB86D224d3';
+const MOCK_ADDRESS_LOWER = MOCK_ADDRESS.toLowerCase();
+const AGENTS = ['foreflow-ensemble', 'foreflow-debate', 'foreflow-orchestrator', 'foreflow-pipeline', 'foreflow-consensus'] as const;
+
+// ---------------------------------------------------------------------------
+// URI format
+// ---------------------------------------------------------------------------
 
 test('buildAgentURI: returns a data:application/json;base64 URI', () => {
-  const uri = buildAgentURI('ensemble', MOCK_ADDRESS);
+  const uri = buildAgentURI('foreflow-ensemble', MOCK_ADDRESS);
   assert.ok(uri.startsWith('data:application/json;base64,'), `Got: ${uri.slice(0, 50)}`);
 });
 
-test('buildAgentURI: decoded name matches foreflow-<agent>', () => {
-  for (const name of ['ensemble', 'debate', 'orchestrator', 'pipeline', 'consensus'] as const) {
-    const uri = buildAgentURI(name, MOCK_ADDRESS);
-    const meta = decodeAgentURI(uri);
-    assert.equal(meta.name, `foreflow-${name}`, `name mismatch for ${name}`);
-  }
+test('buildAgentURI: throws on unknown agent name', () => {
+  assert.throws(() => buildAgentURI('foreflow-unknown', MOCK_ADDRESS), /Unknown agent name/);
 });
 
-test('buildAgentURI: external_url contains the wallet address', () => {
-  const uri = buildAgentURI('ensemble', MOCK_ADDRESS);
-  const meta = decodeAgentURI(uri);
-  assert.ok(
-    meta.external_url.includes(MOCK_ADDRESS),
-    `external_url should include address, got: ${meta.external_url}`,
-  );
-});
+// ---------------------------------------------------------------------------
+// ERC-8004 required fields
+// ---------------------------------------------------------------------------
 
-test('buildAgentURI: image URL contains the agent name', () => {
-  const uri = buildAgentURI('debate', MOCK_ADDRESS);
-  const meta = decodeAgentURI(uri);
-  assert.ok(
-    meta.image.includes('foreflow-debate'),
-    `image should include foreflow-debate, got: ${meta.image}`,
-  );
-  assert.ok(
-    meta.image.startsWith('https://foresightarena.xyz'),
-    `image should be on foresightarena.xyz CDN, got: ${meta.image}`,
-  );
-});
-
-test('buildAgentURI: description includes configuration name and paper reference', () => {
-  const configNames: Record<string, string> = {
-    ensemble: 'independent_ensemble',
-    debate: 'peer_critique_debate',
-    orchestrator: 'orchestrator_specialist',
-    pipeline: 'sequential_pipeline',
-    consensus: 'consensus_alignment',
-  };
-  for (const [name, configName] of Object.entries(configNames)) {
-    const uri = buildAgentURI(name as Parameters<typeof buildAgentURI>[0], MOCK_ADDRESS);
-    const meta = decodeAgentURI(uri);
-    assert.ok(
-      meta.description.includes(configName),
-      `description for ${name} should include config name "${configName}"`,
-    );
-    assert.ok(
-      meta.description.includes('2605.03310'),
-      `description for ${name} should include arxiv paper reference`,
+test('buildAgentURI: type field is ERC-8004 registration v1 URL', () => {
+  for (const name of AGENTS) {
+    const meta = decodeAgentURI(buildAgentURI(name, MOCK_ADDRESS));
+    assert.equal(
+      meta?.type,
+      'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+      `type mismatch for ${name}`,
     );
   }
 });
 
-test('buildAgentURI: attributes include configuration and paper traits', () => {
-  const uri = buildAgentURI('consensus', MOCK_ADDRESS);
-  const meta = decodeAgentURI(uri);
-  const configAttr = meta.attributes.find((a) => a.trait_type === 'configuration');
-  const paperAttr = meta.attributes.find((a) => a.trait_type === 'paper');
-  assert.ok(configAttr, 'attributes must include configuration trait');
-  assert.equal(configAttr?.value, 'consensus_alignment');
-  assert.ok(paperAttr, 'attributes must include paper trait');
-  assert.ok(paperAttr?.value.includes('2605.03310'));
+test('buildAgentURI: active is true', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS));
+  assert.equal(meta?.active, true);
 });
+
+test('buildAgentURI: registrations[0].agentRegistry matches eip155:137 mainnet', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-consensus', MOCK_ADDRESS));
+  assert.ok(Array.isArray(meta?.registrations) && meta.registrations.length === 1);
+  assert.equal(
+    meta?.registrations[0].agentRegistry,
+    'eip155:137:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+  );
+});
+
+test('buildAgentURI: chainId param changes registrations eip155 prefix', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS, 80002));
+  assert.ok(meta?.registrations[0].agentRegistry.startsWith('eip155:80002:'));
+});
+
+// ---------------------------------------------------------------------------
+// name / address fields
+// ---------------------------------------------------------------------------
+
+test('buildAgentURI: name matches full agent name', () => {
+  for (const name of AGENTS) {
+    const meta = decodeAgentURI(buildAgentURI(name, MOCK_ADDRESS));
+    assert.equal(meta?.name, name, `name mismatch for ${name}`);
+  }
+});
+
+test('buildAgentURI: addresses in image and external_url are lowercase', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS));
+  assert.ok(meta?.image.includes(MOCK_ADDRESS_LOWER), `image must use lowercase address`);
+  assert.ok(meta?.external_url.includes(MOCK_ADDRESS_LOWER), `external_url must use lowercase address`);
+  assert.ok(!meta?.image.includes(MOCK_ADDRESS.slice(2, 6)), 'image must not contain mixed-case chars from original');
+});
+
+test('buildAgentURI: image URL is dynamic API endpoint, not static file', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-debate', MOCK_ADDRESS));
+  assert.equal(
+    meta?.image,
+    `https://api.foresightarena.xyz/agent/${MOCK_ADDRESS_LOWER}/image`,
+    `image should be the Arena dynamic endpoint`,
+  );
+});
+
+test('buildAgentURI: external_url points to agent leaderboard page', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-pipeline', MOCK_ADDRESS));
+  assert.equal(
+    meta?.external_url,
+    `https://foresightarena.xyz/agent/${MOCK_ADDRESS_LOWER}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// No non-spec fields
+// ---------------------------------------------------------------------------
+
+test('buildAgentURI: no attributes field (not in ERC-8004 spec)', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS)) as unknown as Record<string, unknown>;
+  assert.ok(!('attributes' in meta), 'attributes field must not be present');
+});
+
+test('buildAgentURI: only spec fields present', () => {
+  const meta = decodeAgentURI(buildAgentURI('foreflow-ensemble', MOCK_ADDRESS)) as unknown as Record<string, unknown>;
+  const allowed = new Set(['type', 'name', 'description', 'image', 'external_url', 'active', 'registrations']);
+  for (const key of Object.keys(meta)) {
+    assert.ok(allowed.has(key), `Unexpected field "${key}" in metadata`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Description content
+// ---------------------------------------------------------------------------
+
+test('buildAgentURI: description cites arxiv paper for all agents', () => {
+  for (const agentName of AGENTS) {
+    const meta = decodeAgentURI(buildAgentURI(agentName, MOCK_ADDRESS));
+    assert.ok(
+      meta?.description.includes('2605.03310'),
+      `description for ${agentName} must cite the paper`,
+    );
+  }
+});
+
+test('buildAgentURI: each agent description is distinct', () => {
+  const descs = AGENTS.map((n) => decodeAgentURI(buildAgentURI(n, MOCK_ADDRESS))?.description);
+  assert.equal(new Set(descs).size, 5, 'All 5 agents must have distinct descriptions');
+});
+
+// ---------------------------------------------------------------------------
+// Distinct URIs / round-trip
+// ---------------------------------------------------------------------------
 
 test('buildAgentURI: each agent produces a distinct URI', () => {
-  const uris = (['ensemble', 'debate', 'orchestrator', 'pipeline', 'consensus'] as const)
-    .map((n) => buildAgentURI(n, MOCK_ADDRESS));
-  const unique = new Set(uris);
-  assert.equal(unique.size, 5, 'All 5 agents must produce distinct URIs');
+  const uris = AGENTS.map((n) => buildAgentURI(n, MOCK_ADDRESS));
+  assert.equal(new Set(uris).size, 5, 'All 5 agents must produce distinct URIs');
 });
 
-test('decodeAgentURI: round-trips correctly', () => {
-  const uri = buildAgentURI('pipeline', MOCK_ADDRESS);
+test('decodeAgentURI: round-trips name and description', () => {
+  const uri = buildAgentURI('foreflow-orchestrator', MOCK_ADDRESS);
   const meta = decodeAgentURI(uri);
-  assert.equal(meta.name, 'foreflow-pipeline');
-  assert.ok(meta.description.length > 0);
-  assert.ok(meta.image.length > 0);
-  assert.ok(meta.external_url.length > 0);
-  assert.ok(Array.isArray(meta.attributes) && meta.attributes.length > 0);
+  assert.equal(meta?.name, 'foreflow-orchestrator');
+  assert.ok((meta?.description.length ?? 0) > 0);
+  assert.ok((meta?.image.length ?? 0) > 0);
+  assert.ok((meta?.external_url.length ?? 0) > 0);
+  assert.equal(meta?.active, true);
+  assert.ok(Array.isArray(meta?.registrations) && meta.registrations.length > 0);
 });
 
-test('decodeAgentURI: throws on non-data URI', () => {
-  assert.throws(
-    () => decodeAgentURI('https://example.com/not-a-data-uri'),
-    /Not a base64 data URI/,
-  );
+test('decodeAgentURI: returns null for non-data URI', () => {
+  assert.equal(decodeAgentURI('https://example.com/not-a-data-uri'), null);
+});
+
+test('decodeAgentURI: returns null for non-ERC-8004 data URI', () => {
+  const wrongType = 'data:application/json;base64,' +
+    Buffer.from(JSON.stringify({ type: 'erc721', name: 'test' })).toString('base64');
+  assert.equal(decodeAgentURI(wrongType), null);
 });
