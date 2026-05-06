@@ -8,7 +8,7 @@ export interface TwitterTokens {
   authorizedAt: number;
 }
 
-export type TweetKind = 'voucher' | 'daily_status' | 'manual';
+export type TweetKind = 'voucher' | 'daily_status' | 'resolution_status' | 'manual';
 
 export interface TweetRecord {
   id?: number;

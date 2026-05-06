@@ -18,8 +18,12 @@ LLM-Based Multi-Agent Systems" (Nechepurenko & Shuvalov, 2026).
 - **`register-all`** — interactive Twitter voucher flow that generates wallets for all five
   agents and registers them on Foresight Arena.
 - **`healthcheck`** — wallet balances, on-chain registration status, last successful run.
-- **`run-agent`** — invoked by cron via `ops/run-agent.sh`; spawns the agent subprocess with
-  the correct `MODE` and env.
+- **`run-agent`** — invoked by cron via `ops/run-agent.sh`; spawns the agent subprocess,
+  captures its JSONL stdout, and writes predictions + LLM traces to SQLite.
+- **`post-daily-status`** — composes and posts a cumulative stats tweet per agent (cron: 18:00 UTC).
+- **`post-resolution-status`** — detects newly resolved rounds and posts one tweet per round (cron: every 30 min).
+- **`receive-events`** — reads JSONL agent events from stdin and writes them to the DB (useful for testing).
+- **`dump-data`** — exports predictions, traces, and tweets to JSONL files for research.
 - **`bootstrap-vps`** — guided one-shot setup from blank VPS.
 
 ## Quick start
@@ -61,6 +65,15 @@ foreflow-engine bootstrap-vps           One-shot VPS setup
 foreflow-engine twitter-auth <agent>    OAuth 2.0 PKCE — authorize a Twitter account
 foreflow-engine test-tweet <agent>      Post a test tweet from an agent account
 foreflow-engine twitter-status          Show token and tweet status for all agents
+foreflow-engine post-daily-status <agent>
+                                        Post cumulative stats tweet (18:00 UTC cron target)
+  --dry-run                               Compose and print — do not post
+foreflow-engine post-resolution-status <agent>
+                                        Check for new round resolutions and post if any
+  --dry-run                               Print tweets that would be posted — do not post
+foreflow-engine receive-events          Read JSONL agent events from stdin → DB
+  --agent <name>                          Agent name (default: foreflow-ensemble)
+foreflow-engine dump-data <output-dir>  Export predictions/traces/tweets to JSONL
 ```
 
 ## Network
@@ -90,21 +103,55 @@ See `.env.example` for the full list. Key variables:
 ## State
 
 Engine state lives in `~/.foreflow-state/`:
-- `foreflow.db` — SQLite database (0600); stores Twitter OAuth tokens and tweet log
+- `foreflow.db` — SQLite database (0600); stores predictions, LLM traces, Twitter tokens, tweets, and runtime state
 - `<agent-name>/registered.json` — agentId, txHash, registration timestamp
 - `<agent-name>/last-discover.txt` — timestamp of last successful discover run
 
 Agent SDK state (reveal queue) lives in `~/.foreflow-state/<agent-name>/.foresight-arena/`,
 isolated per agent.
 
-## Cron schedule
+## Production runtime
+
+### Cron schedule
 
 ```
-discover  every 2h   drain reveal queue, post on-chain reveals
-predict   every 5m   commit predictions when round is within LEAD_TIME_SECONDS (600s)
+discover        every 2h    drain reveal queue, post on-chain reveals
+predict         every 5m    commit predictions when round is within LEAD_TIME_SECONDS (600s)
+daily-status    18:00 UTC   post cumulative stats tweet per agent
+resolution      every 30m   check for newly resolved rounds, post one tweet per round
 ```
 
-See `ops/crontab.example` for the exact entries.
+See `ops/crontab.example` for the full crontab and `ops/run-status.sh` for the wrapper.
+
+### Data flow
+
+```
+foreflow-agents (subprocess)
+  stdout (JSONL events)
+    └─► run-agent → EventHandler → foreflow.db
+                                      └─► predictions + traces
+foreflow.db
+  └─► post-daily-status   → Twitter (18:00 UTC)
+  └─► post-resolution-status → Twitter (every 30m)
+  └─► dump-data           → JSONL export (research)
+```
+
+### Reveal-leak prevention
+
+Status tweets are never published for a round until **all** predictions in that round
+have been revealed on-chain and the round's `reveal_deadline` has passed. This is
+enforced at the SQL query level in `getRevealedRoundsForAgent`. See
+[docs/STATUS_POSTS.md](docs/STATUS_POSTS.md) for details.
+
+### Exporting data
+
+```bash
+foreflow-engine dump-data ~/foreflow-dataset/
+```
+
+Writes `predictions.jsonl`, `traces.jsonl`, `tweets.jsonl`, and `manifest.json`.
+Private keys and Twitter OAuth tokens are never included. See
+[docs/DATA_COLLECTION.md](docs/DATA_COLLECTION.md) for the full schema and query guide.
 
 ## Dependencies
 
@@ -170,6 +217,8 @@ auto-refresh when within 60 seconds of expiry.
 - [REGISTRATION.md](docs/REGISTRATION.md) — Twitter voucher flow walkthrough
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common errors
 - [TWITTER.md](docs/TWITTER.md) — Twitter integration setup and troubleshooting
+- [DATA_COLLECTION.md](docs/DATA_COLLECTION.md) — SQLite schema, JSONL event protocol, query guide, privacy
+- [STATUS_POSTS.md](docs/STATUS_POSTS.md) — daily/resolution tweet templates, reveal-leak rules, troubleshooting
 
 ## Citation
 

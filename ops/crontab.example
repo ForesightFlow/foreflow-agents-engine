@@ -15,3 +15,17 @@
 */5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict orchestrator  >> /var/log/foreflow/orchestrator-predict.log 2>&1
 */5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict pipeline      >> /var/log/foreflow/pipeline-predict.log     2>&1
 */5 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-agent.sh predict consensus     >> /var/log/foreflow/consensus-predict.log    2>&1
+#
+# daily status tweet at 18:00 UTC — one cumulative stats post per agent per day
+0 18 * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh daily foreflow-ensemble      >> /var/log/foreflow/ensemble-status-daily.log     2>&1
+0 18 * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh daily foreflow-debate        >> /var/log/foreflow/debate-status-daily.log       2>&1
+0 18 * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh daily foreflow-orchestrator  >> /var/log/foreflow/orchestrator-status-daily.log 2>&1
+0 18 * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh daily foreflow-pipeline      >> /var/log/foreflow/pipeline-status-daily.log     2>&1
+0 18 * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh daily foreflow-consensus     >> /var/log/foreflow/consensus-status-daily.log    2>&1
+#
+# resolution status every 30 minutes — post once per newly resolved round
+*/30 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh resolution foreflow-ensemble      >> /var/log/foreflow/ensemble-status-resolution.log     2>&1
+*/30 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh resolution foreflow-debate        >> /var/log/foreflow/debate-status-resolution.log       2>&1
+*/30 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh resolution foreflow-orchestrator  >> /var/log/foreflow/orchestrator-status-resolution.log 2>&1
+*/30 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh resolution foreflow-pipeline      >> /var/log/foreflow/pipeline-status-resolution.log     2>&1
+*/30 * * * * /opt/foreflow/foreflow-agents-engine/ops/run-status.sh resolution foreflow-consensus     >> /var/log/foreflow/consensus-status-resolution.log    2>&1

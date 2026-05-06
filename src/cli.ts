@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { AGENT_NAMES, DRY_RUN } from './lib/env.js';
+import { AGENT_NAMES, DRY_RUN, CHAIN_ID } from './lib/env.js';
 import type { AgentName } from './lib/env.js';
 import { FOREFLOW_AGENT_NAMES, TWITTER_HANDLES } from './twitter/agents.js';
 import type { FullAgentName } from './twitter/agents.js';
@@ -60,6 +60,15 @@ COMMANDS
     --text "..."              Custom tweet text (default: timestamped test message)
   twitter-status            Show authorization and tweet counts for all agents
 
+  post-daily-status <agent> Post cumulative daily status tweet (18:00 UTC cron target)
+    --dry-run                 Compose text and print — do not post
+  post-resolution-status <agent>
+                            Check for new round resolutions and post if any
+    --dry-run                 Print tweets that would be posted — do not post
+  receive-events            Read JSONL agent events from stdin and write to DB
+    --agent <name>            Agent name (default: foreflow-ensemble)
+  dump-data <output-dir>    Export predictions/traces/tweets to JSONL files
+
   help                      Show this help
 
 AGENT NAMES
@@ -77,6 +86,10 @@ EXAMPLES
   foreflow-engine twitter-auth foreflow-ensemble
   foreflow-engine test-tweet foreflow-ensemble
   foreflow-engine twitter-status
+  foreflow-engine post-daily-status foreflow-ensemble --dry-run
+  foreflow-engine post-resolution-status foreflow-ensemble --dry-run
+  foreflow-engine dump-data ~/foreflow-dataset/
+  node tools/emit-mock-events.mjs | foreflow-engine receive-events
 
 ENV
   DRY_RUN=1                 Skip on-chain calls (equivalent to --dry-run flag)
@@ -132,6 +145,18 @@ switch (command) {
     break;
   case 'twitter-status':
     await cmdTwitterStatus();
+    break;
+  case 'post-daily-status':
+    await cmdPostDailyStatus();
+    break;
+  case 'post-resolution-status':
+    await cmdPostResolutionStatus();
+    break;
+  case 'receive-events':
+    await cmdReceiveEvents();
+    break;
+  case 'dump-data':
+    await cmdDumpData();
     break;
   case 'help':
   case '--help':
@@ -340,4 +365,99 @@ async function cmdTwitterStatus(): Promise<void> {
   }
 
   console.log(bot);
+}
+
+// ---------------------------------------------------------------------------
+// post-daily-status <agent>
+// ---------------------------------------------------------------------------
+
+async function cmdPostDailyStatus(): Promise<void> {
+  const agentArg = args[0];
+  if (!agentArg) {
+    console.error(`Usage: foreflow-engine post-daily-status <${FOREFLOW_AGENT_NAMES.join('|')}> [--dry-run]`);
+    process.exit(1);
+  }
+  // Accept both short and full names
+  const fullName = agentArg.startsWith('foreflow-') ? agentArg : `foreflow-${agentArg}`;
+  if (!isFullAgentName(fullName)) {
+    console.error(`Unknown agent "${agentArg}". Use: ${FOREFLOW_AGENT_NAMES.join(' | ')}`);
+    process.exit(1);
+  }
+  const dryRun = DRY_RUN || parseFlag('--dry-run');
+  const { postDailyStatus } = await import('./runner/daily-status.js');
+  await postDailyStatus(fullName, { dryRun });
+}
+
+// ---------------------------------------------------------------------------
+// post-resolution-status <agent>
+// ---------------------------------------------------------------------------
+
+async function cmdPostResolutionStatus(): Promise<void> {
+  const agentArg = args[0];
+  if (!agentArg) {
+    console.error(`Usage: foreflow-engine post-resolution-status <${FOREFLOW_AGENT_NAMES.join('|')}> [--dry-run]`);
+    process.exit(1);
+  }
+  const fullName = agentArg.startsWith('foreflow-') ? agentArg : `foreflow-${agentArg}`;
+  if (!isFullAgentName(fullName)) {
+    console.error(`Unknown agent "${agentArg}". Use: ${FOREFLOW_AGENT_NAMES.join(' | ')}`);
+    process.exit(1);
+  }
+  const dryRun = DRY_RUN || parseFlag('--dry-run');
+  const { checkAndPostResolutionStatus } = await import('./runner/resolution-status.js');
+  await checkAndPostResolutionStatus(fullName, { dryRun });
+}
+
+// ---------------------------------------------------------------------------
+// receive-events [--agent <name>]
+// ---------------------------------------------------------------------------
+
+async function cmdReceiveEvents(): Promise<void> {
+  const agentArg = parseOption('--agent') ?? 'foreflow-ensemble';
+  const fullName = agentArg.startsWith('foreflow-') ? agentArg : `foreflow-${agentArg}`;
+  if (!isFullAgentName(fullName)) {
+    console.error(`Unknown agent "${agentArg}". Use --agent <foreflow-ensemble|...>`);
+    process.exit(1);
+  }
+
+  const { openDb } = await import('./storage/sqlite.js');
+  const { EventHandler } = await import('./events/handler.js');
+  const { parseAgentEvent } = await import('./events/types.js');
+  const readline = await import('node:readline');
+
+  const network = (CHAIN_ID === 137 ? 'mainnet' : 'amoy') as 'amoy' | 'mainnet';
+  const db = openDb();
+  const handler = new EventHandler(db, fullName, network);
+
+  const rl = readline.default.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+  let eventCount = 0;
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    const event = parseAgentEvent(line);
+    if (event) {
+      handler.dispatch(event);
+      eventCount++;
+      console.log(`[engine] dispatched ${event.kind}`);
+    } else {
+      // Pass through non-event lines as regular log output
+      console.log(line);
+    }
+  }
+
+  console.log(`\n[engine] receive-events done: ${eventCount} event${eventCount !== 1 ? 's' : ''} dispatched.`);
+}
+
+// ---------------------------------------------------------------------------
+// dump-data <output-dir>
+// ---------------------------------------------------------------------------
+
+async function cmdDumpData(): Promise<void> {
+  const outputDir = args[0];
+  if (!outputDir) {
+    console.error('Usage: foreflow-engine dump-data <output-dir>');
+    process.exit(1);
+  }
+  const { dumpToJsonl } = await import('./storage/dump.js');
+  await dumpToJsonl(outputDir);
 }
