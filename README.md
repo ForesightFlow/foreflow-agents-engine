@@ -48,13 +48,19 @@ The agent runtime (`gaslessCommit`, `gaslessReveal`, `getActiveRounds`, etc.) is
 ## Commands
 
 ```
-foreflow-engine register-all            Register all 5 agents (interactive)
-foreflow-engine register --agent <name> Register a single agent
+foreflow-engine register-all            Register all 5 agents via Twitter voucher flow
+  --dry-run                               Simulate, no network calls
+  --no-manual-fallback                    Skip agents without Twitter tokens
+  --no-confirm-pause                      Skip confirmation + 3s tweet countdown
+foreflow-engine register --agent <name> Register a single agent (same flags)
 foreflow-engine healthcheck             Wallet balances + registration status
 foreflow-engine run-agent <name>        Run one agent (called by cron)
   --mode discover|predict|all
   --live
-foreflow-engine bootstrap-vps          One-shot VPS setup
+foreflow-engine bootstrap-vps           One-shot VPS setup
+foreflow-engine twitter-auth <agent>    OAuth 2.0 PKCE — authorize a Twitter account
+foreflow-engine test-tweet <agent>      Post a test tweet from an agent account
+foreflow-engine twitter-status          Show token and tweet status for all agents
 ```
 
 ## Network
@@ -78,12 +84,15 @@ See `.env.example` for the full list. Key variables:
 | `DRY_RUN=1` | Skip on-chain calls (safe default) |
 | `RPC_URL` | Polygon JSON-RPC endpoint |
 | `CHAIN_ID` | 80002 (Amoy) or 137 (mainnet) |
+| `TWITTER_CLIENT_ID` | Twitter Developer App OAuth 2.0 client ID |
+| `TWITTER_CLIENT_SECRET` | Twitter Developer App OAuth 2.0 client secret |
 
 ## State
 
-Engine state lives in `~/.foreflow-state/<agent-name>/`:
-- `registered.json` — agentId, txHash, registration timestamp
-- `last-discover.txt` — timestamp of last successful discover run
+Engine state lives in `~/.foreflow-state/`:
+- `foreflow.db` — SQLite database (0600); stores Twitter OAuth tokens and tweet log
+- `<agent-name>/registered.json` — agentId, txHash, registration timestamp
+- `<agent-name>/last-discover.txt` — timestamp of last successful discover run
 
 Agent SDK state (reveal queue) lives in `~/.foreflow-state/<agent-name>/.foresight-arena/`,
 isolated per agent.
@@ -134,11 +143,18 @@ engine test-tweet foreflow-ensemble
 engine test-tweet foreflow-ensemble --text "Custom test tweet"
 ```
 
+### Voucher autopost
+
+`register-all` and `register` automatically post the challenge tweet for any agent
+whose Twitter account is authorized. Unauthorized agents fall back to a manual
+URL-paste prompt. Pass `--no-manual-fallback` to skip unready agents (non-zero exit)
+or `--dry-run` to preview without touching the network.
+
+See [REGISTRATION.md](docs/REGISTRATION.md) for the full flow and flag reference.
+
 ### Programmatic posting
 
-Internal callers use `postFromAgent()` from `src/twitter/post.ts`. The voucher
-registration flow (added in a subsequent release) and the daily status flow use
-this helper.
+Internal callers use `postFromAgent()` from `src/twitter/post.ts`.
 
 ### Token storage
 

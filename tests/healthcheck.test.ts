@@ -29,7 +29,10 @@ test('register-all --dry-run shows all 5 agents', () => {
   for (const name of ['ensemble', 'debate', 'orchestrator', 'pipeline', 'consensus']) {
     assert.ok(out.includes(name), `Expected "${name}" in register-all output`);
   }
-  assert.ok(out.includes('[dry-run]'), 'Expected [dry-run] marker in output');
+  assert.ok(
+    out.includes('[DRY-RUN]') || out.includes('[dry-run]'),
+    'Expected dry-run marker in output',
+  );
 });
 
 test('healthcheck --dry-run shows all 5 agents without error', () => {

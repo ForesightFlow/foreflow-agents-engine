@@ -100,10 +100,14 @@ export async function runHealthcheck(): Promise<boolean> {
 
     const regStatus = h.registered ? 'registered' : 'NOT REGISTERED — run register-all';
     const balance = h.balancePOL ?? '?';
-    const balanceFlag = parseFloat(balance) < 0.01 && balance !== '?' ? ' ⚠ low balance' : '';
+    // Gasless mode: agents never need POL. Low balance is informational, not a warning.
+    const balanceNote =
+      parseFloat(balance) < 0.01 && balance !== '?'
+        ? ' (gasless mode — POL not required)'
+        : '';
     const lastRun = h.lastDiscover ?? 'never';
 
-    console.log(`[OK]   ${label}  ${h.address}  ${balance} POL  ${regStatus}  last-discover=${lastRun}${balanceFlag}`);
+    console.log(`[OK]   ${label}  ${h.address}  ${balance} POL${balanceNote}  ${regStatus}  last-discover=${lastRun}`);
 
     if (!h.registered) allOk = false;
   }

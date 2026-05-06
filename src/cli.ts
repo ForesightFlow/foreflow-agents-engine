@@ -45,7 +45,10 @@ USAGE
 
 COMMANDS
   register-all              Register all 5 agents via Twitter voucher flow
-  register --agent <name>   Register a single agent
+    --dry-run                 Simulate full flow, no network calls
+    --no-manual-fallback      Skip agents without Twitter tokens (no manual prompt)
+    --no-confirm-pause        Skip confirmation prompt and 3s tweet pause
+  register --agent <name>   Register a single agent (same flags as register-all)
   healthcheck               Check wallet balances, registration, and relayer
   run-agent <name>          Invoke a single agent (used by cron wrapper)
     --mode discover|predict|all
@@ -59,27 +62,46 @@ COMMANDS
 
   help                      Show this help
 
-AGENT NAMES (for Twitter commands)
-  foreflow-ensemble | foreflow-debate | foreflow-orchestrator
-  foreflow-pipeline | foreflow-consensus
+AGENT NAMES
+  For register: ensemble | debate | orchestrator | pipeline | consensus
+    (also accepted: foreflow-ensemble, foreflow-debate, etc.)
+  For Twitter commands: foreflow-ensemble | foreflow-debate | foreflow-orchestrator
+    | foreflow-pipeline | foreflow-consensus
 
 EXAMPLES
-  foreflow-engine register-all
+  foreflow-engine register-all --dry-run
+  foreflow-engine register-all --no-manual-fallback
+  foreflow-engine register --agent foreflow-ensemble --dry-run
   foreflow-engine healthcheck
   foreflow-engine run-agent ensemble --mode discover --live
   foreflow-engine twitter-auth foreflow-ensemble
   foreflow-engine test-tweet foreflow-ensemble
-  foreflow-engine test-tweet foreflow-ensemble --text "Hello from ensemble"
   foreflow-engine twitter-status
 
 ENV
-  DRY_RUN=1                 Skip on-chain calls (default for register-all simulation)
+  DRY_RUN=1                 Skip on-chain calls (equivalent to --dry-run flag)
   FOREFLOW_AGENTS_DIR       Path to foreflow-agents repo (default: ../foreflow-agents)
   TWITTER_CLIENT_ID         Twitter Developer App OAuth 2.0 client ID
   TWITTER_CLIENT_SECRET     Twitter Developer App OAuth 2.0 client secret
 
-See docs/DEPLOYMENT.md and docs/TWITTER.md for full setup instructions.
+See docs/DEPLOYMENT.md, docs/TWITTER.md, and docs/REGISTRATION.md for setup instructions.
 `.trim());
+}
+
+function parseRegisterOpts() {
+  return {
+    dryRun: DRY_RUN || parseFlag('--dry-run'),
+    noManualFallback: parseFlag('--no-manual-fallback'),
+    noConfirmPause: parseFlag('--no-confirm-pause'),
+  };
+}
+
+// Accept both 'ensemble' and 'foreflow-ensemble'
+function parseAgentArg(): AgentName | undefined {
+  const arg = parseOption('--agent') ?? args[0];
+  if (!arg) return undefined;
+  const short = arg.startsWith('foreflow-') ? arg.slice('foreflow-'.length) : arg;
+  return isAgentName(short) ? (short as AgentName) : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,17 +150,9 @@ switch (command) {
 // ---------------------------------------------------------------------------
 
 async function cmdRegisterAll(): Promise<void> {
-  const { registerAgent } = await import('./register/interactive.js');
-  console.log('ForeFlow agent registration');
-  console.log(`Registering ${AGENT_NAMES.length} agents. Each requires a separate tweet.`);
-  if (DRY_RUN) console.log('DRY_RUN=1 — simulating flow without on-chain transactions.\n');
-
-  for (const name of AGENT_NAMES) {
-    await registerAgent(name);
-  }
-
-  console.log('\nAll agents processed. Add the generated keys to your .env file.');
-  console.log('Run `foreflow-engine healthcheck` to verify registration.');
+  const { registerAll } = await import('./register/interactive.js');
+  await registerAll(parseRegisterOpts());
+  console.log('\nRun `foreflow-engine healthcheck` to verify registration.');
 }
 
 // ---------------------------------------------------------------------------
@@ -146,13 +160,18 @@ async function cmdRegisterAll(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function cmdRegister(): Promise<void> {
-  const agentArg = parseOption('--agent');
-  if (!agentArg || !isAgentName(agentArg)) {
-    console.error(`Usage: foreflow-engine register --agent <${AGENT_NAMES.join('|')}>`);
+  const name = parseAgentArg();
+  if (!name) {
+    console.error(
+      `Usage: foreflow-engine register --agent <${AGENT_NAMES.join('|')}> [--dry-run] [--no-manual-fallback] [--no-confirm-pause]`,
+    );
     process.exit(1);
   }
   const { registerAgent } = await import('./register/interactive.js');
-  await registerAgent(agentArg);
+  const result = await registerAgent(name, parseRegisterOpts());
+  if (result.status !== 'registered' && result.status !== 'aborted') {
+    process.exitCode = 1;
+  }
   console.log('\nRun `foreflow-engine healthcheck` to verify registration.');
 }
 

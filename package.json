@@ -1,6 +1,6 @@
 {
   "name": "foreflow-agents-engine",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Operational infrastructure for ForeFlow agents — registration, scheduling, healthcheck, and deployment",
   "type": "module",
   "bin": {
