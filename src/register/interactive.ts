@@ -101,7 +101,9 @@ function shortToFull(name: AgentName): FullAgentName {
 }
 
 function networkName(): string {
-  return CHAIN_ID === 137 ? 'Polygon mainnet' : 'Polygon Amoy testnet';
+  if (CHAIN_ID === 137) return 'Polygon mainnet';
+  if (CHAIN_ID === 80002) return 'Polygon Amoy testnet';
+  return `Polygon (chain ${CHAIN_ID})`;
 }
 
 function arenaAddress(): string {

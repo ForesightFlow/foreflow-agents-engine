@@ -328,6 +328,49 @@ export function getRevealedRoundsForAgent(
   });
 }
 
+export function getResolvedAndRevealedRoundsForAgent(
+  db: Database.Database,
+  agentName: string,
+  sinceTimestamp: number,
+  nowUnix?: number,
+): { roundId: string; predictions: PredictionRecord[] }[] {
+  const now = nowUnix ?? Math.floor(Date.now() / 1000);
+
+  // A round qualifies if ALL three conditions hold:
+  // 1. ALL predictions in the round have reveal_at IS NOT NULL (fully revealed on-chain)
+  // 2. The round's reveal_deadline, if present, is in the past
+  // 3. At least one prediction has outcome IS NOT NULL AND resolved_at > sinceTimestamp
+  //
+  // TODO(claude-code): reveal_deadline is never populated by the current event pipeline.
+  // The prediction_started AgentEvent type has no revealDeadline field, so EventHandler
+  // never sets it. Every row has reveal_deadline = NULL, meaning condition 2 always passes
+  // (NULL ⇒ no restriction). To enable the deadline guard, add revealDeadline to the
+  // prediction_started event type and emit it from agent subprocesses.
+  const roundIds = (
+    db
+      .prepare(`
+        SELECT round_id
+        FROM predictions
+        WHERE agent_name = ?
+          AND (reveal_deadline IS NULL OR reveal_deadline < ?)
+        GROUP BY round_id
+        HAVING COUNT(*) = COUNT(reveal_at)
+          AND SUM(CASE WHEN outcome IS NOT NULL AND resolved_at > ? THEN 1 ELSE 0 END) > 0
+        ORDER BY MIN(resolved_at) ASC
+      `)
+      .all(agentName, now, sinceTimestamp) as Array<{ round_id: string }>
+  ).map((r) => r.round_id);
+
+  return roundIds.map((roundId) => {
+    const predictions = (
+      db
+        .prepare('SELECT * FROM predictions WHERE agent_name = ? AND round_id = ?')
+        .all(agentName, roundId) as PredRow[]
+    ).map(rowToPrediction);
+    return { roundId, predictions };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Traces
 // ---------------------------------------------------------------------------

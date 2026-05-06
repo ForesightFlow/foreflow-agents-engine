@@ -171,6 +171,70 @@ test('multiple resolved rounds → one post per round', async () => {
   assert.ok(posted.includes('multi-r2'));
 });
 
+// ---------------------------------------------------------------------------
+// Reveal-gate regression tests (v0.4.1) — CRITICAL
+// ---------------------------------------------------------------------------
+
+test('CRITICAL: partially revealed round (1 of 4 unrevealed) → no post', async () => {
+  const agent = 'foreflow-partial-reveal';
+  // 4 markets in same round
+  const p1 = savePrediction(db, seedPred({ agentName: agent, roundId: 'pr-round', marketId: 'prm1' }));
+  const p2 = savePrediction(db, seedPred({ agentName: agent, roundId: 'pr-round', marketId: 'prm2' }));
+  const p3 = savePrediction(db, seedPred({ agentName: agent, roundId: 'pr-round', marketId: 'prm3' }));
+  const p4 = savePrediction(db, seedPred({ agentName: agent, roundId: 'pr-round', marketId: 'prm4' }));
+
+  // Reveal and resolve 3 of 4
+  resolveAt(p1.id!, 1, NOW - 500);
+  resolveAt(p2.id!, 0, NOW - 500);
+  resolveAt(p3.id!, 1, NOW - 500);
+  // p4: outcome IS set, but reveal_at remains NULL (not revealed on-chain yet)
+  updatePredictionResolution(db, p4.id!, 0, NOW - 500, Math.pow(0.65 - 0, 2));
+
+  let posted = false;
+  _setPostFnForTest(async () => { posted = true; return {} as TweetRecord; });
+
+  await checkAndPostResolutionStatus(agent);
+  assert.equal(posted, false, 'Must not post when one prediction in the round is unrevealed');
+});
+
+test('CRITICAL: future reveal_deadline → no post even when fully revealed and resolved', async () => {
+  const agent = 'foreflow-future-deadline';
+  // Seed with an explicit future reveal_deadline
+  const p = savePrediction(db, {
+    ...seedPred({ agentName: agent, roundId: 'fd-round', marketId: 'fdm1' }),
+    revealDeadline: NOW + 3600,   // deadline 1 hour from NOW
+  });
+  resolveAt(p.id!, 1, NOW - 500);   // reveal_at set, outcome set — but deadline not past
+
+  let posted = false;
+  _setPostFnForTest(async () => { posted = true; return {} as TweetRecord; });
+
+  await checkAndPostResolutionStatus(agent);
+  assert.equal(posted, false, 'Must not post when reveal_deadline is still in the future');
+});
+
+test('concurrency guard: second sequential call finds state advanced by first, posts nothing', async () => {
+  const agent = 'foreflow-conc-guard';
+  const p = savePrediction(db, seedPred({ agentName: agent, roundId: 'cg-round', marketId: 'cgm1' }));
+  resolveAt(p.id!, 1, NOW - 150);
+
+  let callCount = 0;
+  _setPostFnForTest(async () => {
+    callCount++;
+    if (callCount > 1) throw new Error('BUG: post called more than once for same round');
+    return {} as TweetRecord;
+  });
+
+  // First invocation: posts and advances last_resolution_post_at
+  await checkAndPostResolutionStatus(agent);
+  assert.equal(callCount, 1, 'First call should post once');
+
+  // Second invocation (simulates a parallel cron tick that runs after first completes):
+  // reads updated state → finds no rounds with resolvedAt > new lastPostAt → no post
+  await checkAndPostResolutionStatus(agent);
+  assert.equal(callCount, 1, 'Second call must not post again for the same resolved round');
+});
+
 // Cleanup
 test.after?.(() => {
   try { rmSync(TMP, { recursive: true }); } catch { /* ignore */ }

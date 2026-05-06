@@ -108,29 +108,46 @@ repeatedly will print the same pending tweets.
 
 ---
 
-## Reveal-leak prevention
+## Reveal-leak prevention guarantee
 
-**Rule:** A round is never included in any status post until every prediction in that
-round has been revealed on-chain **and** the round's `reveal_deadline` has passed.
+A round is never included in any status post (daily or resolution) unless ALL of these
+conditions hold for every prediction the agent submitted in that round:
 
-Implementation in `getRevealedRoundsForAgent`:
+1. **All revealed on-chain** — every prediction in the round has `reveal_at IS NOT NULL`
+   in the local DB (`HAVING COUNT(*) = COUNT(reveal_at)`).
+2. **Deadline passed** — the round's `reveal_deadline`, if set, is in the past
+   (`reveal_deadline IS NULL OR reveal_deadline < now`). A `NULL` deadline is treated as
+   "no restriction" (see note below).
+3. **(Resolution posts only)** — at least one of the agent's predictions in that round
+   has `outcome IS NOT NULL` AND `resolved_at > last_resolution_post_at`, meaning there
+   is actually something new to announce.
 
-```sql
-SELECT round_id FROM predictions
-WHERE agent_name = ?
-  AND (reveal_deadline IS NULL OR reveal_deadline < ?)
-GROUP BY round_id
-HAVING COUNT(*) = COUNT(reveal_at)
-```
+This ensures no directional or Brier-score information is published about predictions that
+are still active in the commit or reveal phase.
 
-- `HAVING COUNT(*) = COUNT(reveal_at)` ensures every prediction in the round has a
-  non-null `reveal_at`.
-- The `reveal_deadline` guard prevents posting when other agents in the same round
-  could still be undercut by a leaked probability.
+### Implementation
 
-This query is the single authoritative filter used by both `postDailyStatus` and
-`checkAndPostResolutionStatus`. Adding a new posting path without using this function
-is a correctness bug.
+| Post type | Helper | Source |
+|---|---|---|
+| Daily status | `getRevealedRoundsForAgent()` | `src/storage/predictions.ts` |
+| Resolution status | `getResolvedAndRevealedRoundsForAgent()` | `src/storage/predictions.ts` |
+
+Both helpers share the same first two guards (all-revealed + deadline). Adding a new
+posting path without going through one of these helpers is a correctness bug.
+
+The resolution-status live path additionally wraps the read → post → write cycle in a
+`BEGIN IMMEDIATE` SQLite transaction so that parallel cron ticks cannot race on
+`last_resolution_post_at` and post duplicate tweets.
+
+### Note on `reveal_deadline`
+
+The `reveal_deadline` column exists in the DB schema and is honoured by both query
+helpers, but it is not currently populated by the JSONL event pipeline — the
+`prediction_started` event type has no `revealDeadline` field. All production rows
+therefore have `reveal_deadline = NULL`, which satisfies the `IS NULL` branch of the
+guard (fail-open: no restriction applied). The "all revealed" guard (`COUNT(reveal_at)`)
+provides the primary protection. To enable deadline enforcement, add `revealDeadline` to
+the `prediction_started` event and emit it from agent subprocesses.
 
 ---
 
@@ -159,8 +176,11 @@ pending posts.
 
 ### Duplicate tweets
 
-Each resolution post run saves `last_resolution_post_at` to the DB immediately after
-posting. If the process is killed between posts (multiple rounds pending), the rounds
-whose posts completed are already recorded; the killed round will be re-posted on the
-next cron tick. There is no deduplication guard beyond this timestamp — avoid running
-multiple instances of the same agent's resolution cron simultaneously.
+The resolution post loop runs inside a `BEGIN IMMEDIATE` SQLite transaction. A second
+process attempting the same agent's resolution run will block on that transaction (up to
+10 s `busy_timeout`) and then read the already-advanced `last_resolution_post_at`,
+finding no new rounds to post.
+
+If the process is killed mid-loop (multiple rounds pending), the rounds whose tweets were
+already sent have their `resolved_at` values already tracked; only the killed round will
+be re-posted on the next cron tick. This is at-least-once delivery per round.

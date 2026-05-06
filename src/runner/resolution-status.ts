@@ -1,5 +1,9 @@
 import { openDb } from '../storage/sqlite.js';
-import { getRuntimeState, setRuntimeState, listPredictionsForAgent } from '../storage/predictions.js';
+import {
+  getRuntimeState,
+  setRuntimeState,
+  getResolvedAndRevealedRoundsForAgent,
+} from '../storage/predictions.js';
 import { postFromAgent } from '../twitter/post.js';
 import type { PredictionRecord } from '../storage/predictions.js';
 
@@ -68,6 +72,17 @@ export function composeResolutionText(
   return lines.join('\n');
 }
 
+function buildText(roundId: string, predictions: PredictionRecord[]): string {
+  let text = composeResolutionText(roundId, predictions);
+  if (text.length > MAX_TWEET_LENGTH) {
+    text = `Round ${roundId} resolved. ${predictions.length} markets.\nforesightarena.xyz/round/${roundId}`;
+  }
+  if (text.length > MAX_TWEET_LENGTH) {
+    text = text.slice(0, MAX_TWEET_LENGTH - 1) + '…';
+  }
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -77,57 +92,51 @@ export async function checkAndPostResolutionStatus(
   opts?: { dryRun?: boolean },
 ): Promise<void> {
   const dryRun = opts?.dryRun ?? false;
-
+  const now = Math.floor(Date.now() / 1000);
   const db = openDb();
   const stateKey = `last_resolution_post_at:${agentName}`;
-  const lastPostAt = parseInt(getRuntimeState(db, stateKey) ?? '0', 10);
 
-  // Find predictions resolved after our last post — for THIS agent only
-  const allPreds = listPredictionsForAgent(db, agentName);
-  const newlyResolved = allPreds.filter(
-    (p) =>
-      p.outcome !== undefined &&
-      p.outcome !== null &&
-      p.resolvedAt !== undefined &&
-      p.resolvedAt > lastPostAt,
-  );
+  if (dryRun) {
+    // Dry-run: read-only, no state update, no lock needed
+    const lastPostAt = parseInt(getRuntimeState(db, stateKey) ?? '0', 10);
+    const eligibleRounds = getResolvedAndRevealedRoundsForAgent(db, agentName, lastPostAt, now);
 
-  if (newlyResolved.length === 0) {
-    if (dryRun) {
+    if (eligibleRounds.length === 0) {
       console.log(`[DRY-RUN] No new resolutions for ${agentName} since last post.`);
-    }
-    return;
-  }
-
-  // Group by round_id
-  const byRound = new Map<string, PredictionRecord[]>();
-  for (const p of newlyResolved) {
-    const arr = byRound.get(p.roundId) ?? [];
-    arr.push(p);
-    byRound.set(p.roundId, arr);
-  }
-
-  let latestResolvedAt = lastPostAt;
-
-  for (const [roundId, preds] of byRound) {
-    let text = composeResolutionText(roundId, preds);
-
-    if (text.length > MAX_TWEET_LENGTH) {
-      // Terse fallback
-      text = `Round ${roundId} resolved. ${preds.length} markets.\nforesightarena.xyz/round/${roundId}`;
-    }
-    if (text.length > MAX_TWEET_LENGTH) {
-      text = text.slice(0, MAX_TWEET_LENGTH - 1) + '…';
+      return;
     }
 
-    if (dryRun) {
+    for (const { roundId, predictions } of eligibleRounds) {
+      const text = buildText(roundId, predictions);
       console.log(`[DRY-RUN] Resolution status for ${agentName} round ${roundId} (${text.length} chars):`);
       console.log('─'.repeat(50));
       console.log(text);
       console.log('─'.repeat(50));
-    } else {
+    }
+    return;
+  }
+
+  // Live path: IMMEDIATE transaction prevents parallel cron ticks from racing on
+  // lastPostAt and posting duplicate tweets. A second process trying BEGIN IMMEDIATE
+  // while this one holds the lock will block (up to busy_timeout) then skip safely.
+  db.pragma('busy_timeout = 10000');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const lastPostAt = parseInt(getRuntimeState(db, stateKey) ?? '0', 10);
+    const eligibleRounds = getResolvedAndRevealedRoundsForAgent(db, agentName, lastPostAt, now);
+
+    if (eligibleRounds.length === 0) {
+      db.exec('COMMIT');
+      return;
+    }
+
+    let highestResolvedAt = lastPostAt;
+
+    for (const { roundId, predictions } of eligibleRounds) {
+      const text = buildText(roundId, predictions);
       const RETRY_DELAYS_MS = [30_000, 60_000, 120_000];
       let posted = false;
+
       for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
         try {
           await _postFn(agentName, text, 'resolution_status', { relatedRoundId: roundId });
@@ -149,16 +158,20 @@ export async function checkAndPostResolutionStatus(
           break;
         }
       }
+
       if (!posted) continue;
+
+      for (const p of predictions) {
+        if ((p.resolvedAt ?? 0) > highestResolvedAt) highestResolvedAt = p.resolvedAt!;
+      }
     }
 
-    // Track max resolved_at across all posted rounds
-    for (const p of preds) {
-      if ((p.resolvedAt ?? 0) > latestResolvedAt) latestResolvedAt = p.resolvedAt!;
+    if (highestResolvedAt > lastPostAt) {
+      setRuntimeState(db, stateKey, String(highestResolvedAt));
     }
-  }
-
-  if (!dryRun && latestResolvedAt > lastPostAt) {
-    setRuntimeState(db, stateKey, String(latestResolvedAt));
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
   }
 }
