@@ -5,6 +5,8 @@ import {
   saveTrace,
   updatePredictionComplete,
   updatePredictionFailed,
+  updatePredictionCommit,
+  updatePredictionReveal,
 } from '../storage/predictions.js';
 
 export class EventHandler {
@@ -123,6 +125,36 @@ export class EventHandler {
           break;
         }
         updatePredictionFailed(this.db, predId, event.reason);
+        break;
+      }
+
+      case 'committed': {
+        const predId = this.lookupPredId(
+          event.predictionRef.roundId,
+          event.predictionRef.marketId,
+        );
+        if (predId === undefined) {
+          process.stderr.write(
+            `[engine] committed: no prediction for ${event.predictionRef.roundId}:${event.predictionRef.marketId}\n`,
+          );
+          break;
+        }
+        updatePredictionCommit(this.db, predId, event.txHash, event.timestamp, event.salt);
+        break;
+      }
+
+      case 'revealed': {
+        const predId = this.lookupPredId(
+          event.predictionRef.roundId,
+          event.predictionRef.marketId,
+        );
+        if (predId === undefined) {
+          process.stderr.write(
+            `[engine] revealed: no prediction for ${event.predictionRef.roundId}:${event.predictionRef.marketId}\n`,
+          );
+          break;
+        }
+        updatePredictionReveal(this.db, predId, event.txHash, event.timestamp);
         break;
       }
     }

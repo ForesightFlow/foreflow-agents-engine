@@ -40,6 +40,19 @@ export type AgentEvent =
       timestamp: number;
       predictionRef: { roundId: string; marketId: string };
       reason: string;
+    }
+  | {
+      kind: 'committed';
+      timestamp: number;
+      predictionRef: { roundId: string; marketId: string };
+      txHash: string;
+      salt: string;
+    }
+  | {
+      kind: 'revealed';
+      timestamp: number;
+      predictionRef: { roundId: string; marketId: string };
+      txHash: string;
     };
 
 const KNOWN_KINDS = new Set<string>([
@@ -47,6 +60,8 @@ const KNOWN_KINDS = new Set<string>([
   'llm_call',
   'prediction_complete',
   'prediction_failed',
+  'committed',
+  'revealed',
 ]);
 
 export function parseAgentEvent(line: string): AgentEvent | null {

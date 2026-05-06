@@ -11,6 +11,30 @@ import type { AgentName } from '../lib/env.js';
 
 export type AgentMode = 'discover' | 'predict' | 'all';
 
+function listOrphanPredictions(
+  db: ReturnType<typeof openDb>,
+  agentName: string,
+): Array<{ id: number }> {
+  return db
+    .prepare(
+      `SELECT id FROM predictions
+       WHERE agent_name = ? AND status = 'predicted' AND total_cost_usd IS NULL`,
+    )
+    .all(agentName) as Array<{ id: number }>;
+}
+
+function markOrphansAsFailed(
+  db: ReturnType<typeof openDb>,
+  ids: number[],
+): void {
+  if (ids.length === 0) return;
+  const placeholders = ids.map(() => '?').join(',');
+  db.prepare(
+    `UPDATE predictions SET status = 'failed', failure_reason = 'subprocess_terminated'
+     WHERE id IN (${placeholders})`,
+  ).run(...ids);
+}
+
 export async function spawnAgent(name: AgentName, mode: AgentMode, live: boolean): Promise<void> {
   const agentsDir = getAgentsDir();
   const entryPoint = join(agentsDir, 'dist', 'agents', `foreflow-${name}`, 'agent.js');
@@ -39,6 +63,8 @@ export async function spawnAgent(name: AgentName, mode: AgentMode, live: boolean
   const db = openDb();
   const handler = new EventHandler(db, `foreflow-${name}`, network);
 
+  const orphansBefore = new Set(listOrphanPredictions(db, `foreflow-${name}`).map((p) => p.id));
+
   const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
   rl.on('line', (line) => {
     const event = parseAgentEvent(line);
@@ -54,12 +80,29 @@ export async function spawnAgent(name: AgentName, mode: AgentMode, live: boolean
     }
   });
 
-  await new Promise<void>((resolve, reject) => {
-    child.on('exit', (code) => {
-      rl.close();
-      if (code === 0 || code === null) resolve();
-      else reject(new Error(`foreflow-${name} (mode=${mode}) exited with code ${code}`));
+  let subprocessOk = false;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.on('exit', (code) => {
+        rl.close();
+        if (code === 0 || code === null) resolve();
+        else reject(new Error(`foreflow-${name} (mode=${mode}) exited with code ${code}`));
+      });
+      child.on('error', (err) => { rl.close(); reject(err); });
     });
-    child.on('error', (err) => { rl.close(); reject(err); });
-  });
+    subprocessOk = true;
+  } finally {
+    if (!subprocessOk) {
+      const allOrphans = listOrphanPredictions(db, `foreflow-${name}`);
+      const newOrphanIds = allOrphans
+        .filter((p) => !orphansBefore.has(p.id))
+        .map((p) => p.id);
+      if (newOrphanIds.length > 0) {
+        markOrphansAsFailed(db, newOrphanIds);
+        process.stderr.write(
+          `[spawn] Marked ${newOrphanIds.length} orphan prediction(s) as failed (subprocess_terminated)\n`,
+        );
+      }
+    }
+  }
 }
