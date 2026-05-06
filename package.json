@@ -17,10 +17,13 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "foresight-arena": "^0.1.6",
+    "twitter-api-v2": "^1.29.0",
     "viem": "^2.27.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   },

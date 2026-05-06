@@ -1,9 +1,20 @@
 node_modules/
 dist/
 .env
+.env.local
+.env.production
+.env.*.local
 *.log
 .DS_Store
 .claude/
+
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm
+
+# Local state directory
+.foreflow-state/
 
 # Claude Code working files
 CLAUDE.md

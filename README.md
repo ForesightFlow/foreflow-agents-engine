@@ -104,11 +104,56 @@ See `ops/crontab.example` for the exact entries.
 | `foresight-arena` | `^0.1.6` | SDK: registration, healthcheck queries |
 | `viem` | `^2.27.0` | Wallet generation, balance queries |
 
+## Twitter integration
+
+Each of the five agents posts updates to its dedicated Twitter account. Authentication
+uses OAuth 2.0 PKCE — agents authorize a shared Developer App once, then the engine
+posts on their behalf.
+
+### Initial setup
+
+1. Set `TWITTER_CLIENT_ID` and `TWITTER_CLIENT_SECRET` in `.env`
+   (obtain from https://developer.twitter.com).
+2. Register `http://localhost:8765/callback` as an OAuth callback URL in the Twitter
+   Developer Portal app settings.
+3. For each agent, run the OAuth flow:
+   ```
+   engine twitter-auth foreflow-ensemble
+   ```
+   The CLI will print a URL; open it in a browser, log in **as the correct agent
+   account**, and approve. Repeat for each of the five agents.
+4. Verify status:
+   ```
+   engine twitter-status
+   ```
+
+### Posting test tweets
+
+```
+engine test-tweet foreflow-ensemble
+engine test-tweet foreflow-ensemble --text "Custom test tweet"
+```
+
+### Programmatic posting
+
+Internal callers use `postFromAgent()` from `src/twitter/post.ts`. The voucher
+registration flow (added in a subsequent release) and the daily status flow use
+this helper.
+
+### Token storage
+
+Access and refresh tokens are stored in the local SQLite database at
+`~/.foreflow-state/foreflow.db`. The DB file has 0600 permissions. Tokens
+auto-refresh when within 60 seconds of expiry.
+
+---
+
 ## Docs
 
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) — step-by-step from blank VPS
 - [REGISTRATION.md](docs/REGISTRATION.md) — Twitter voucher flow walkthrough
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common errors
+- [TWITTER.md](docs/TWITTER.md) — Twitter integration setup and troubleshooting
 
 ## Citation
 
