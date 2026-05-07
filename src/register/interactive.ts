@@ -219,7 +219,7 @@ async function doRegister(
         `[DRY-RUN] Would mint Agent NFT on chain (Arena: ${arena})`,
       );
       console.log(`[DRY-RUN]   Estimated gas: ~0.005 POL (paid by relayer)`);
-      console.log(`[DRY-RUN]   agentURI: ${buildAgentURI(fullName, mockAddr, CHAIN_ID)}`);
+      console.log(`[DRY-RUN]   agentURI: ${buildAgentURI({ name: fullName, agentId: 0, walletAddress: mockAddr })}`);
       console.log(
         `[DRY-RUN] Would save to ~/.foreflow-state/${name}/registered.json`,
       );
@@ -334,7 +334,7 @@ async function doRegisterLive(
 
   // Register via relayer
   console.log('Registering on chain (gasless via relayer)...');
-  const agentURI = buildAgentURI(fullName, address, CHAIN_ID);
+  const agentURI = buildAgentURI({ name: fullName, agentId: 0, walletAddress: address });
   const reg = (await _registerFn({ agent: address, agentURI, voucher })) as RegisterResult;
 
   const agentId = reg.agentId ?? reg.txHash ?? '(unknown)';

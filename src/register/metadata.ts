@@ -1,53 +1,13 @@
 /**
- * ERC-8004 registration v1 metadata builder.
+ * ERC-8004 registration v1 metadata builder — minimal on-chain footprint.
  *
- * Schema per SKILL.md and reference implementation:
- * https://github.com/foresight-arena/contracts/blob/main/SKILL.md
- * https://github.com/foresight-arena/contracts/blob/main/agents/random-benchmark/agent.mjs
+ * Only required fields: type, name, active, registrations[{agentId, agentAddress}].
+ * Drops image, external_url, description, $schema to minimise calldata gas cost.
  */
 
-const ERC_8004_TYPE = 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1';
-const ERC_8004_REGISTRY = '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432';
+// TODO: cleanup — CONFIG_DESCRIPTIONS, CONFIG_FROM_AGENT, ERC_8004_REGISTRY removed in this refactor.
 
-// ---------------------------------------------------------------------------
-// Per-configuration descriptions
-// ---------------------------------------------------------------------------
-
-const CONFIG_DESCRIPTIONS: Record<string, string> = {
-  independent_ensemble:
-    'AI forecasting agent using independent-ensemble coordination ' +
-    '(3 parallel reasoners, mean probability). One of five reference ' +
-    'configurations from arxiv.org/abs/2605.03310. Production deployment ' +
-    'on Foresight Arena.',
-  peer_critique_debate:
-    'AI forecasting agent using peer-critique debate coordination ' +
-    '(3 reasoners with structured cross-critique, integrated probability). ' +
-    'One of five reference configurations from arxiv.org/abs/2605.03310. ' +
-    'Production deployment on Foresight Arena.',
-  orchestrator_specialist:
-    'AI forecasting agent using orchestrator-specialist coordination ' +
-    '(orchestrator dispatches to 3 specialists, integrates results). ' +
-    'One of five reference configurations from arxiv.org/abs/2605.03310. ' +
-    'Production deployment on Foresight Arena.',
-  sequential_pipeline:
-    'AI forecasting agent using sequential-pipeline coordination ' +
-    '(research, then analysis, then estimation, 3 stages). One of five ' +
-    'reference configurations from arxiv.org/abs/2605.03310. Production ' +
-    'deployment on Foresight Arena.',
-  consensus_alignment:
-    'AI forecasting agent using consensus-alignment coordination ' +
-    '(3 reasoners iteratively converge, ε=0.05 tolerance). One of five ' +
-    'reference configurations from arxiv.org/abs/2605.03310. Production ' +
-    'deployment on Foresight Arena.',
-};
-
-const CONFIG_FROM_AGENT: Record<string, string> = {
-  'foreflow-ensemble': 'independent_ensemble',
-  'foreflow-debate': 'peer_critique_debate',
-  'foreflow-orchestrator': 'orchestrator_specialist',
-  'foreflow-pipeline': 'sequential_pipeline',
-  'foreflow-consensus': 'consensus_alignment',
-};
+const AGENT_TYPE = 'AgentRegistration';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -56,11 +16,15 @@ const CONFIG_FROM_AGENT: Record<string, string> = {
 export interface AgentMetadata {
   type: string;
   name: string;
-  description: string;
-  image: string;
-  external_url: string;
   active: boolean;
-  registrations: Array<{ agentRegistry: string }>;
+  registrations: Array<{ agentId: number; agentAddress: string }>;
+}
+
+export interface AgentURIInput {
+  name: string;
+  agentId: number;
+  walletAddress: string;
+  chainId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,37 +34,29 @@ export interface AgentMetadata {
 /**
  * Build the on-chain agentURI for a ForeFlow agent.
  *
- * Returns a `data:application/json;base64,...` URL so the metadata is
- * self-contained and survives without a hosted server.
- *
- * @param agentName   Full agent name, e.g. 'foreflow-ensemble'
- * @param walletAddress  Agent wallet (checksummed or lowercase — stored lowercase in URI)
- * @param chainId     Polygon mainnet (137) by default
+ * Returns a `data:application/json;base64,...` URI so the metadata is
+ * self-contained. Wallet address is lowercased per CAIP-10 convention.
  */
-export function buildAgentURI(
-  agentName: string,
-  walletAddress: string,
-  chainId = 137,
-): string {
-  const configuration = CONFIG_FROM_AGENT[agentName];
-  if (!configuration) throw new Error(`Unknown agent name: ${agentName}`);
-
-  const addr = walletAddress.toLowerCase();
+export function buildAgentURI(input: AgentURIInput): string {
+  const chainId = input.chainId ?? 137;
   const metadata: AgentMetadata = {
-    type: ERC_8004_TYPE,
-    name: agentName,
-    description: CONFIG_DESCRIPTIONS[configuration],
-    image: 'https://raw.githubusercontent.com/ForesightFlow/foreflow-agents/master/avatar.png',
-    external_url: `https://foresightarena.xyz/agent/${addr}`,
+    type: AGENT_TYPE,
+    name: input.name,
     active: true,
-    registrations: [{ agentRegistry: `eip155:${chainId}:${ERC_8004_REGISTRY}` }],
+    registrations: [
+      {
+        agentId: input.agentId,
+        agentAddress: `eip155:${chainId}:${input.walletAddress.toLowerCase()}`,
+      },
+    ],
   };
-  return 'data:application/json;base64,' + Buffer.from(JSON.stringify(metadata)).toString('base64');
+  const json = JSON.stringify(metadata);
+  return 'data:application/json;base64,' + Buffer.from(json, 'utf-8').toString('base64');
 }
 
 /**
  * Decode an agentURI back to its metadata.
- * Returns null if the URI is not ERC-8004 registration v1 metadata.
+ * Returns null if the URI is not a valid AgentRegistration data URI.
  */
 export function decodeAgentURI(uri: string): AgentMetadata | null {
   if (!uri.startsWith('data:application/json;base64,')) return null;
@@ -108,7 +64,7 @@ export function decodeAgentURI(uri: string): AgentMetadata | null {
     const parsed = JSON.parse(
       Buffer.from(uri.slice('data:application/json;base64,'.length), 'base64').toString('utf8'),
     ) as AgentMetadata;
-    if (parsed.type !== ERC_8004_TYPE) return null;
+    if (parsed.type !== AGENT_TYPE) return null;
     return parsed;
   } catch {
     return null;
