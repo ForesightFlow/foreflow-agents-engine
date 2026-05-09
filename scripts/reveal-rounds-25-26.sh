@@ -26,7 +26,7 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 # Verify engine is built
 # ---------------------------------------------------------------------------
 
-[[ -f "$ENGINE/dist/cli.js" ]] || die "dist/cli.js not found — run: cd $ENGINE && npm run build"
+[[ -f "$ENGINE/dist/src/cli.js" ]] || die "dist/src/cli.js not found — run: cd $ENGINE && npm run build"
 
 # ---------------------------------------------------------------------------
 # Query on-chain reveal windows for rounds 25 and 26
@@ -97,7 +97,7 @@ except Exception:
 
 run_discover() {
   log "Running discover (live)..."
-  cd "$ENGINE" && node dist/cli.js run-agent ensemble --mode discover --live
+  cd "$ENGINE" && node dist/src/cli.js run-agent ensemble --mode discover --live
   log "Discover run completed."
 }
 
@@ -198,3 +198,20 @@ if q:
 else:
     print('  (empty)')
 " || echo "  (queue file not found)"
+
+# ---------------------------------------------------------------------------
+# Restore .env: remove MODE=discover, ensure DRY_RUN=1
+# ---------------------------------------------------------------------------
+
+ENV_FILE="$ENGINE/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  log "Restoring .env..."
+  # Remove MODE line (was set to 'discover' for this task)
+  sed -i '' '/^MODE=/d' "$ENV_FILE"
+  # Remove any existing DRY_RUN line, then append DRY_RUN=1
+  sed -i '' '/^DRY_RUN=/d' "$ENV_FILE"
+  echo "DRY_RUN=1" >> "$ENV_FILE"
+  log ".env restored: MODE removed, DRY_RUN=1 set."
+else
+  log "WARNING: .env not found at $ENV_FILE — skipping restore."
+fi
